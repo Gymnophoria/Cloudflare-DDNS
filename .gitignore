@@ -59,3 +59,20 @@ typings/
 
 # next.js build output
 .next
+
+# macOS
+.DS_Store
+
+# IntelliJ
+.idea/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# program files
+ddns.cache
+config.json

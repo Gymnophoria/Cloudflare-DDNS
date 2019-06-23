@@ -1,0 +1,28 @@
+{
+  "name": "cloudflare-ddns",
+  "version": "1.0.0",
+  "description": "Cloudflare Dynamic DNS updater",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gymnophoria/Cloudflare-DDNS.git"
+  },
+  "keywords": [
+    "cloudflare",
+    "dns",
+    "ddns",
+    "dynamic"
+  ],
+  "author": "Gymnophoria",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Gymnophoria/Cloudflare-DDNS/issues"
+  },
+  "homepage": "https://github.com/Gymnophoria/Cloudflare-DDNS#readme",
+  "dependencies": {
+    "public-ip": "^3.1.0"
+  }
+}
