@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/Gymnophoria/Cloudflare-DDNS#readme",
   "dependencies": {
-    "public-ip": "^3.1.0"
+    "public-ip": "^3.1.0",
+    "request": "^2.88.0"
   }
 }
