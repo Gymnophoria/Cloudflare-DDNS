@@ -29,5 +29,5 @@ If you need to update multiple entries, considering using CNAME DNS records on c
 `name`: (String) The name of the record you are updating  
 *Optional*  
 `ipv6`: (Boolean) Whether or not your IP is an IPv6 IP address, true meaning it is. Default: `false`  
-`proxied`: (Boolean) Whether or not to proxy this record's traffic through Cloudflare's network. Default is none, meaning no change.
+`proxied`: (Boolean) Whether or not to proxy this record's traffic through Cloudflare's network. Default is none, meaning no change.  
 `refresh`: (int) How often to check for an IP change, in seconds. Default 300 seconds (5 minutes)
