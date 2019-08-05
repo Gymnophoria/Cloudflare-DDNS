@@ -3,14 +3,16 @@ const request = require('request');
 const path = require('path');
 const fs = require('fs');
 
+const API_ENDPOINT = 'https://api.cloudflare.com/client/v4';
+
 class DDNS {
-	constructor(email, key, zone, name, ipv6 = false, proxied, refresh = 300) {
+	constructor(email, key, zone, name, ipv6 = false, proxied = null, refresh = 300) {
 		this.email = email;
 		this.key = key;
 		this.zone = zone;
 		this.name = name;
 		this.ipv6 = ipv6;
-		this.proxied = proxied ? proxied : null;
+		this.proxied = proxied;
 		this.refresh = refresh;
 	}
 
@@ -103,7 +105,7 @@ class DDNS {
 		return new Promise((resolve, reject) => {
 			const options = {
 				method: 'GET',
-				url: `https://api.cloudflare.com/client/v4/zones/${this.zone}/dns_records?name=${this.name}`,
+				url: `${API_ENDPOINT}/zones/${this.zone}/dns_records?name=${this.name}`,
 				headers: {
 					'X-Auth-Key': this.key,
 					'X-Auth-Email': this.email
@@ -149,7 +151,7 @@ class DDNS {
 		return new Promise((resolve, reject) => {
 			const options = {
 				method: 'PUT',
-				url: `https://api.cloudflare.com/client/v4/zones/${this.zone}/dns_records/${this.cache.recordID}`,
+				url: `${API_ENDPOINT}/zones/${this.zone}/dns_records/${this.cache.recordID}`,
 				headers: {
 					'X-Auth-Key': this.key,
 					'X-Auth-Email': this.email
@@ -167,7 +169,7 @@ class DDNS {
 				if (err) return reject(err);
 				if (!body.success) return reject(body.errors);
 
-				this.cache.recordContent = body.result[0].content;
+				this.cache.recordContent = body.result.content;
 				resolve();
 			});
 		});
