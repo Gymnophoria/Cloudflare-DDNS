@@ -1,27 +1,43 @@
-const publicIp = require('public-ip');
+const publicIP = require('public-ip');
 const request = require('request');
 const path = require('path');
 const fs = require('fs');
 
 const API_ENDPOINT = 'https://api.cloudflare.com/client/v4';
 
+DEFAULT_IPV6_VAL = false;
+DEFAULT_PROXIED_VAL = null;
+DEFAULT_REFRESH = 300;
+
 class DDNS {
-	constructor(email, key, zone, name, ipv6 = false, proxied = null, refresh = 300) {
-		this.email = email;
-		this.key = key;
-		this.zone = zone;
-		this.name = name;
-		this.ipv6 = ipv6;
-		this.proxied = proxied;
+	constructor(configs, refresh = DEFAULT_REFRESH) {
+		this.configs = [];
 		this.refresh = refresh;
+		this.fetch_ipv4 = false;
+		this.fetch_ipv6 = false;
+
+		configs.forEach(({ email, key, zone, name, ipv6 = DEFAULT_IPV6_VAL,
+			proxied = DEFAULT_PROXIED_VAL }) => {
+			this.configs.push({ email, key, zone, name, ipv6, proxied });
+
+			if (ipv6)
+				this.fetch_ipv6 = true;
+			else
+				this.fetch_ipv4 = true;
+		});
 	}
 
 	async init() {
-		const cachePath = path.join('.', 'ddns.cache');
+		if (this.configs.length === 0)
+			return console.error('No configs defined!');
+
+		const cachePath = path.join(__dirname, 'ddns.cache');
 
 		if (!fs.existsSync(cachePath)) {
 			console.log('No ddns.cache file found, creating one.');
-			fs.writeFileSync(cachePath, '{}');
+			fs.writeFileSync(cachePath, JSON.stringify({
+				records: Array(this.configs.length).fill({})
+			}));
 		}
 
 		console.log('Reading cache file.');
@@ -29,11 +45,14 @@ class DDNS {
 		this.cache = JSON.parse(cacheFile);
 		let write = false;
 
-		if (!this.cache.recordID) {
-			console.log('Fetching record ID from Cloudflare.');
+		for (const [index, record] of this.cache.records.entries()) {
+			if (record.recordID && record.recordContent)
+				continue;
+
+			console.log(`Fetching record ID ${index} from Cloudflare.`);
 
 			try {
-				await this._getRecordID();
+				await this._getRecordID(index);
 			} catch (err) {
 				return console.error('Error fetching record ID:\n' + err);
 			}
@@ -42,9 +61,9 @@ class DDNS {
 			write = true;
 		}
 
-		if (!this.cache.currentIP) write = true;
+		if (!this.cache.currentIPv4 && !this.cache.currentIPv6) write = true;
 
-		console.log('Fetching public IP address');
+		console.log('Fetching public IP address.');
 
 		try {
 			await this._getIP();
@@ -54,18 +73,8 @@ class DDNS {
 
 		console.log('Fetched public IP.');
 
-		if (this.cache.currentIP !== this.cache.recordContent) {
-			console.log(`Updating DNS record from ${this.cache.recordContent} to ${this.cache.currentIP}`);
-
-			try {
-				await this._updateRecord();
-			} catch (err) {
-				return console.error('Error updating DNS record:\n' + err);
-			}
-
-			console.log('DNS record is up to date.');
+		if (this._checkRecords())
 			write = true;
-		}
 
 		if (write) {
 			console.log('Writing cache to disk.');
@@ -81,19 +90,8 @@ class DDNS {
 		this._interval = setInterval(async () => {
 			await this._getIP();
 
-			if (this.cache.currentIP !== this.cache.recordContent) {
-				console.log(`Updating DNS record from ${this.cache.recordContent} to ${this.cache.currentIP}`);
-
-				try {
-					await this._updateRecord();
-				} catch (err) {
-					return console.error('Error updating DNS record:\n' + err);
-				}
-
-				console.log('DNS record is up to date.');
-
+			if (this._checkRecords())
 				this._writeCache();
-			}
 		}, this.refresh * 1000);
 	}
 
@@ -101,14 +99,41 @@ class DDNS {
 		if (this._interval) clearInterval(this._interval);
 	}
 
-	_getRecordID() {
+	// return: bool: whether to write new cache to disk
+	async _checkRecords(index, record) {
+		let write = false;
+
+		for (const [index, record] of this.cache.records.entries()) {
+			if (this.cache.currentIPv4 === record.recordContent || 
+				this.cache.currentIPv6 === record.recordContent)
+				continue;
+	
+			console.log(`Updating DNS record ${index} from ${record.recordContent} to ` +
+				(record.ipv6 ? this.cache.currentIPv6 : this.cache.currentIPv4));
+	
+			try {
+				await this._updateRecord(index);
+			} catch (err) {
+				console.error('Error updating DNS record:\n' + err);
+				process.exit();
+			}
+	
+			console.log('DNS record is up to date.');
+			write = true;
+		}
+
+		return write;
+	}
+
+	_getRecordID(index) {
 		return new Promise((resolve, reject) => {
 			const options = {
 				method: 'GET',
-				url: `${API_ENDPOINT}/zones/${this.zone}/dns_records?name=${this.name}`,
+				url: `${API_ENDPOINT}/zones/${this.configs[index].zone}` +
+					`/dns_records?name=${this.configs[index].name}`,
 				headers: {
-					'X-Auth-Key': this.key,
-					'X-Auth-Email': this.email
+					'X-Auth-Key': this.configs[index].key,
+					'X-Auth-Email': this.configs[index].email
 				},
 				json: true
 			};
@@ -117,8 +142,8 @@ class DDNS {
 				if (err) return reject(err);
 				if (!body.success) return reject(body.errors);
 
-				this.cache.recordID = body.result[0].id;
-				this.cache.recordContent = body.result[0].content;
+				this.cache.records[index].recordID = body.result[0].id;
+				this.cache.records[index].recordContent = body.result[0].content;
 				resolve();
 			});
 		});
@@ -126,71 +151,90 @@ class DDNS {
 
 	_getIP() {
 		return new Promise(async (resolve, reject) => {
-			let ip;
+			let v4, v6;
 
 			try {
-				ip = this.ipv6
-					? await publicIp.v6()
-					: await publicIp.v4();
+				if (this.fetch_ipv4)
+					v4 = await publicIP.v4();
+				if (this.fetch_ipv6)
+					v6 = await publicIP.v6();
 			} catch (err) {
 				return reject(err);
 			}
 
-			if (ip) {
-				this.cache.currentIP = ip;
+			if (v4 || v6) {
+				if (v4)
+					this.cache.currentIPv4 = v4;
+				if (v6)
+					this.cache.currentIPv6 = v6;
+
 				resolve();
 			} else reject('Could not fetch IP using module.');
 		});
 	}
 
 	_writeCache() {
-		fs.writeFileSync(path.join('.', 'ddns.cache'), JSON.stringify(this.cache), 'utf8')
+		fs.writeFileSync(path.join(__dirname, 'ddns.cache'), JSON.stringify(this.cache), 'utf8')
 	}
 
-	_updateRecord() {
+	_updateRecord(index) {
 		return new Promise((resolve, reject) => {
+			const config = this.configs[index];
+
 			const options = {
 				method: 'PUT',
-				url: `${API_ENDPOINT}/zones/${this.zone}/dns_records/${this.cache.recordID}`,
+				url: `${API_ENDPOINT}/zones/${config.zone}/dns_records/` + 
+					`${this.cache.records[index].recordID}`,
 				headers: {
-					'X-Auth-Key': this.key,
-					'X-Auth-Email': this.email
+					'X-Auth-Key': config.key,
+					'X-Auth-Email': config.email
 				},
 				json: {
-					type: this.ipv6 ? 'AAAA' : 'A',
-					name: this.name,
-					content: this.cache.currentIP
+					type: config.ipv6 ? 'AAAA' : 'A',
+					name: config.name,
+					content: config.ipv6 ? this.cache.currentIPv6 : this.cache.currentIPv4
 				}
 			};
 
-			if (this.proxied !== null) options.json.proxied = this.proxied;
+			if (config.proxied !== null)
+				options.json.proxied = config.proxied;
 
 			request(options, (err, res, body) => {
 				if (err) return reject(err);
 				if (!body.success) return reject(body.errors);
 
-				this.cache.recordContent = body.result.content;
+				this.cache.records[index].recordContent = body.result.content;
 				resolve();
 			});
 		});
 	}
 }
 
-if (!fs.existsSync(path.join('.', 'config.json'))) return console.error('There is no config.json file! Create one according to the README.md document.');
+if (!fs.existsSync(path.join(__dirname, 'config.json')))
+	return console.error('There is no config.json file! See README.');
 
 const requiredConfigProperties = [ 'email', 'key', 'zone', 'name' ];
 const config = require('./config.json');
 
-let end = false;
-requiredConfigProperties.forEach(prop => {
-	if (!config[prop]) {
-		end = true;
-		console.error(`Config is missing required property "${prop}" - add it.`);
-	}
-});
+if (!config)
+	return console.error('Invalid config.json file. See README.');
 
-if (end) return;
+if (!config.configs || !Array.isArray(config.configs))
+	return console.error('No (or invalid) configurations present in config.json. See README.')
 
-ddns = new DDNS(config.email, config.key, config.zone, config.name, config.ipv6, config.proxied, config.refresh);
+for (const [index, conf] of config.configs.entries()) {
+	let end = false;
+	
+	requiredConfigProperties.forEach(prop => {
+		if (!conf[prop]) {
+			end = true;
+			console.error(`Config ${index} is missing required property "${prop}" - add it.`);
+		}
+	});
+
+	if (end) return;
+}
+
+const ddns = new DDNS(config.configs, config.refresh);
 ddns.init().catch(console.error);
 ddns.start();
