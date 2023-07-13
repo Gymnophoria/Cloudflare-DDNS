@@ -45,6 +45,17 @@ class DDNS {
 		this.cache = JSON.parse(cacheFile);
 		let write = false;
 
+		if (this.cache.records.length !== this.configs.length) {
+			console.log('Configuration changed. Resetting cache.');
+			
+			this.cache = { records: Array(this.configs.length) }
+
+			for (let i = 0; i < this.configs.length; ++i)
+				this.cache.records[i] = {};
+
+			write = true;
+		}
+
 		for (const [index, record] of this.cache.records.entries()) {
 			if (record.recordID && record.recordContent)
 				continue;
